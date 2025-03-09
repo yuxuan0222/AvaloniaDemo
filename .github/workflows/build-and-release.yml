@@ -1,0 +1,72 @@
+name: Windows x64 打包與發布
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: 檢出程式碼
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 設置 .NET 環境
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0 # 請根據您的專案需要調整版本
+    
+    - name: 安裝 Velopack CLI
+      run: dotnet tool install --global Velopack.Cli
+    
+    - name: 取得版本號
+      id: get_version
+      shell: pwsh
+      run: |
+        $version = "1.0.0"
+        if ("${{ github.ref }}" -match "refs/tags/v(.*)") {
+          $version = $Matches[1]
+        }
+        echo "VERSION=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+    
+    - name: 還原相依套件
+      run: dotnet restore
+    
+    - name: 建置專案
+      run: dotnet build --configuration Release --no-restore
+    
+    - name: 發布 AvaloniaDemo.Desktop 專案
+      run: dotnet publish AvaloniaDemo.Desktop/AvaloniaDemo.Desktop.csproj -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:PublishReadyToRun=true -o ./publish/windows
+    
+    - name: 建立 Velopack 套件
+      run: vpk pack -u AvaloniaDemo -v ${{ steps.get_version.outputs.VERSION }} -p ./publish/windows -o ./artifacts/windows
+    
+    - name: 上傳 Velopack 成品
+      uses: actions/upload-artifact@v4
+      with:
+        name: windows-velopack
+        path: ./artifacts/windows
+    
+    # 只有當推送 tag 時才會執行此步驟（用於發布）
+    - name: 建立 GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        name: 版本 ${{ steps.get_version.outputs.VERSION }}
+        files: ./artifacts/windows/**/*
+        body: |
+          ## AvaloniaDemo 版本 ${{ steps.get_version.outputs.VERSION }}
+          
+          ### 下載與安裝說明
+          
+          這是針對 Windows x64 平台的發布版本。
+          
+          - 下載 `.exe` 檔案並執行安裝程式
+          - 或者下載 `.nupkg` 檔案用於更新現有安裝
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
